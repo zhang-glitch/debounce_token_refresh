@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    const axiosInstance = axios.create({
+        baseURL: 'http://localhost:3000/',
+        timeout: 3000
+    });
+
+    axiosInstance.interceptors.request.use(function (config) {
+      const accessToken = localStorage.getItem('access_token');
+
+      if(accessToken) {
+          config.headers.authorization = 'Bearer ' + accessToken;
+      }
+      return config;
+    })
+
+    // 拦截器，添加请求token
+    axiosInstance.interceptors.response.use(
+      (response) => {
+          return response;
+      },
+      // 当http本身状态码返回的不是200,将会调用错误回调函数
+      async (error) => {
+          let { data, config } = error.response;
+          // 401 身份认证失效
+          if (data.statusCode === 401 && !config.url.includes('/refresh')) {
+              // 主动刷新token，尝试重新生成token,如果refresh_token也未过期，将让用户重新登录，
+              // 生成成功，主动调用当前访问的接口。
+              const res = await refreshToken();
+
+              if(res.status === 200) {
+                  return axiosInstance(config);
+              } else {
+                  alert(data || '登录过期，请重新登录');
+              }
+          } else {
+              return error.response;
+          }
+      }
+    )
+
+    async function userLogin(username, password) {
+        return await axiosInstance.post('/login', {
+            username,
+            password
+        });
+    }
+
+    async function refreshToken() {
+      const res = await axiosInstance.get('/refresh', {
+          params: {
+            token: localStorage.getItem('refresh_token')
+          }
+      });
+      localStorage.setItem('access_token', res.data.accessToken);
+      localStorage.setItem('refresh_token', res.data.refreshToken);
+      return res;
+    }
+    async function index() {
+      return await axiosInstance.get('/index');
+    }
+  </script>
+
+  <script>
+    const app = Vue.createApp({
+      template: `
+        <div>
+          <label for="username">账号： </label>
+          <input type="text" id="username" v-model="username">
+        </div>
+        <div>
+          <label for="password">密码： </label>
+          <input type="text" id="password" v-model="password">
+        </div>
+
+        <button  @click="handleLogin">登录</button>
+        <button  @click="handleIndex">访问index接口</button>
+        <h1 >当前用户： {{userInfo}}</h1>
+        <h1 >index接口返回: {{content}}</h1>
+      `,
+      setup() {
+        const username = Vue.ref("zhanghao")
+        const password = Vue.ref("123456")
+        const content = Vue.ref("")
+        const userInfo = Vue.ref("")
+
+        /**
+         * 登录
+        */
+        async function handleLogin() {
+          const { data } = await userLogin(username.value, password.value)
+          localStorage.setItem('access_token', data.accessToken);
+          localStorage.setItem('refresh_token', data.refreshToken);
+          userInfo.value = data.userInfo
+        }
+
+        async function handleIndex() {
+          // 如果是并发请求的话，将会刷新若干次token.
+          const data = await Promise.all([index(), index(), index()])
+          // 串行请求就不会
+          // const { data } = await index()
+          // await index()
+          // await index()
+          // content.value = data
+          console.log("data", data)
+        }
+        return {
+          userInfo,
+          username,
+          password,
+          content,
+          handleIndex,
+          handleLogin
+        }
+      },
+    })
+
+    app.mount("#app")
+    
+  
+  </script>
+</body>
+</html>
